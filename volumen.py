@@ -40,7 +40,7 @@ def main():
         num_hands=2,
         min_hand_detection_confidence=0.6,
         min_hand_presence_confidence=0.5,
-        min_tracking_confidence=0.1
+        min_tracking_confidence=0.2
     )
     
     options_pose = mp.tasks.vision.PoseLandmarkerOptions(
@@ -207,23 +207,20 @@ def main():
                 
                 if dedos_estirados:
                     historial_pos[h_idx].append((current_smoothed[4], time.time()))
+
                     if len(historial_pos[h_idx]) > 15:
                         historial_pos[h_idx].pop(0)
+                else:
+                    historial_pos[h_idx] = []
                     
-                    if len(historial_pos[h_idx]) >= 10:
-                        direccion_hor = obtener_direccion_hor(historial_pos[h_idx])
-                        direccion_ver = obtener_direccion_ver(historial_pos[h_idx])
-                        ahora = time.time()
-                        
-                        if es_palma:
+                if len(historial_pos[h_idx]) >= 10:
+                    direccion_hor = obtener_direccion_hor(historial_pos[h_idx])
+                    direccion_ver = obtener_direccion_ver(historial_pos[h_idx])
+                    ahora = time.time()
 
-                            if direccion_ver == DIR_ARR_ABJ and ahora - last_gestos[h_idx]['bajar'] >= 1 and mano_nombre == MANO_IZQ:
-                                client_socket.sendto(b"VOLUME_DOWN", SERVER_ADDR)
-                                mensaje = f"Bajar volumen"
-                                last_gestos[h_idx]['bajar'] = ahora
-                                historial_pos[h_idx] = []
-
-                        else:
+                    if dedos_estirados:
+                            
+                        if not es_palma:
 
                             if direccion_ver == DIR_ABJ_ARR and ahora - last_gestos[h_idx]['subir'] >= 1 and mano_nombre == MANO_IZQ:
                                 client_socket.sendto(b"VOLUME_UP", SERVER_ADDR)
@@ -231,9 +228,13 @@ def main():
                                 last_gestos[h_idx]['subir'] = ahora
                                 historial_pos[h_idx] = []
 
-                else:
-                    historial_pos[h_idx] = []
-                
+                    if es_palma:
+                        if direccion_ver == DIR_ARR_ABJ and ahora - last_gestos[h_idx]['bajar'] >= 1 and mano_nombre == MANO_IZQ:
+                            client_socket.sendto(b"VOLUME_DOWN", SERVER_ADDR)
+                            mensaje = f"Bajar volumen"
+                            last_gestos[h_idx]['bajar'] = ahora
+                            historial_pos[h_idx] = []
+                    
                 if mensaje:
                     mensajes.append(mensaje)
                 
