@@ -115,6 +115,20 @@ def main():
                             estado_orquesta = "PLAYING"
                             send_gesture("START")
                             historial_pos[h_idx] = [] # Limpiar para evitar doble disparo
+                        elif estado_orquesta == "PLAYING":
+                            x_pulgar = current_smoothed[4][0]
+                            y_pulgar = current_smoothed[4][1]
+
+                            x_indice = current_smoothed[8][0]
+                            y_indice = current_smoothed[8][1]
+
+                            # distancia de vectores
+                            d_pulgar_indice = math.sqrt(((x_pulgar - x_indice)**2) + ((y_pulgar - y_indice)**2))
+
+                            if d_pulgar_indice < 0.03:
+                                estado_orquesta = "READY"
+                                send_gesture("STOP")
+                                historial_pos[h_idx] = [] # Limpiar para evitar doble disparo
 
 
                 # Dibujo básico
