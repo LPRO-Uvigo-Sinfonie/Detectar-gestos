@@ -7,15 +7,18 @@ import math
 import time
 import os
 import socket
+import tempfile
 
-# Configuración UDP
-UDP_IP = "127.0.0.1"
-UDP_PORT = 5005
-sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+# Configuración UNIX
+UNIX_ADDR = os.path.join(tempfile.gettempdir(), "sinfonie-server.socket")
+# Unix Addr especial para piter porque el unity es un flatpak :(
+# UNIX_ADDR = "/home/piter/.var/app/com.unity.UnityHub/cache/tmp/sinfonie-server.socket"
+sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+sock.connect(UNIX_ADDR)
 
 def send_gesture(msg):
-    sock.sendto(msg.encode(), (UDP_IP, UDP_PORT))
-    print(f"UDP >> {msg}")
+    sock.sendall(msg.encode())
+    print(f"UNIX >> {msg}")
 
 def main():
     model_path_hand = "hand_landmarker.task"
