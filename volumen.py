@@ -18,10 +18,12 @@ class TManosProcesadas(TypedDict):
 
 def main(): 
 
-    # --- UDP Cliente ---
-
-    client_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    SERVER_ADDR = ("127.0.0.1", 5005)
+    # Configuración UNIX
+    # UNIX_ADDR = os.path.join(tempfile.gettempdir(), "sinfonie-server.socket")
+    # Unix Addr especial para piter porque el unity es un flatpak :(
+    UNIX_ADDR = "/home/piter/.var/app/com.unity.UnityHub/cache/tmp/sinfonie-server.socket"
+    client_socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    client_socket.connect(UNIX_ADDR)
 
     # --- MODELOS ---
     model_path_hand = "hand_landmarker.task"
@@ -223,14 +225,14 @@ def main():
                         if not es_palma:
 
                             if direccion_ver == DIR_ABJ_ARR and ahora - last_gestos[h_idx]['subir'] >= 1 and mano_nombre == MANO_IZQ:
-                                client_socket.sendto(b"VOLUME_UP", SERVER_ADDR)
+                                client_socket.sendall(b"VOLUME_UP")
                                 mensaje = f"Subir volumen"
                                 last_gestos[h_idx]['subir'] = ahora
                                 historial_pos[h_idx] = []
 
                     if es_palma:
                         if direccion_ver == DIR_ARR_ABJ and ahora - last_gestos[h_idx]['bajar'] >= 1 and mano_nombre == MANO_IZQ:
-                            client_socket.sendto(b"VOLUME_DOWN", SERVER_ADDR)
+                            client_socket.sendall(b"VOLUME_DOWN")
                             mensaje = f"Bajar volumen"
                             last_gestos[h_idx]['bajar'] = ahora
                             historial_pos[h_idx] = []
