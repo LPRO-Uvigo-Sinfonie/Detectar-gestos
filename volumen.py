@@ -19,9 +19,9 @@ class TManosProcesadas(TypedDict):
 def main(): 
 
     # Configuración UNIX
-    # UNIX_ADDR = os.path.join(tempfile.gettempdir(), "sinfonie-server.socket")
+    UNIX_ADDR = os.path.join(tempfile.gettempdir(), "sinfonie-server.socket")
     # Unix Addr especial para piter porque el unity es un flatpak :(
-    UNIX_ADDR = "/home/piter/.var/app/com.unity.UnityHub/cache/tmp/sinfonie-server.socket"
+    # UNIX_ADDR = "/home/piter/.var/app/com.unity.UnityHub/cache/tmp/sinfonie-server.socket"
     client_socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     client_socket.connect(UNIX_ADDR)
 
