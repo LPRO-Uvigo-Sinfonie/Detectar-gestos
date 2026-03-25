@@ -9,14 +9,15 @@ import os
 import socket
 from multiprocessing import Lock
 
-# Configuración UDP
-UDP_IP = "127.0.0.1"
-UDP_PORT = 5005
-sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+# Configuración TCP
+TCP_IP = "127.0.0.1"
+TCP_PORT = 5005
+sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+sock.connect((TCP_IP, TCP_PORT))
 
 def send_gesture(msg):
-    sock.sendto(msg.encode(), (UDP_IP, UDP_PORT))
-    print(f"UDP >> {msg}")
+    sock.sendall(msg.encode())
+    print(f"TCP >> {msg}")
 
 # Esto queda aquí porque dentro de main no funciona :(
 m_estado_orquesta = Lock()
@@ -31,14 +32,11 @@ def main():
                         (0,17), (17,18), (18,19), (19,20)]
 
     # General var
-    m_alpha = Lock()
-    alpha = 0.65
+    ALPHA = 0.65
     m_prev_hands = Lock()
     prev_hands = {}
     m_historial_pos = Lock()
     historial_pos = {0: [], 1: []}
-
-
 
     # Pose var
     m_altura_pecho_y = Lock()
@@ -61,7 +59,7 @@ def main():
                 if h_idx in prev_hands:
                     for i, lm in enumerate(hand):
                         prev = prev_hands[h_idx][i]
-                        current_smoothed.append((alpha*lm.x + (1-alpha)*prev[0], alpha*lm.y + (1-alpha)*prev[1]))
+                        current_smoothed.append((ALPHA*lm.x + (1-ALPHA)*prev[0], ALPHA*lm.y + (1-ALPHA)*prev[1]))
                 else:
                     current_smoothed = [(lm.x, lm.y) for lm in hand]
                 prev_hands[h_idx] = current_smoothed
