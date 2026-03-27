@@ -8,6 +8,17 @@ import time
 import os
 import socket
 from multiprocessing import Lock
+from enum import Enum
+
+class MessageType(Enum):
+    Ready = 0,
+    Start = 1,
+    Stop = 2,
+    Calderon = 10,
+    OffCalderon = 11,
+    VolumeUp = 20,
+    VolumeDown = 21,
+    Tempo = 30
 
 # Configuración TCP
 TCP_IP = "127.0.0.1"
@@ -15,9 +26,9 @@ TCP_PORT = 5005
 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 sock.connect((TCP_IP, TCP_PORT))
 
-def send_gesture(msg):
-    sock.sendall(msg.encode())
-    print(f"TCP >> {msg}")
+def send_gesture(msg: bytes):
+    sock.sendall(msg)
+    print(f"TCP >> {str(msg)}")
 
 # Esto queda aquí porque dentro de main no funciona :(
 m_estado_orquesta = Lock()
@@ -75,7 +86,7 @@ def main():
                 with m_estado_orquesta:
                     if en_zona_media and estado_orquesta == "IDLE":
                         estado_orquesta = "READY"
-                        send_gesture("READY")
+                        send_gesture(bytes(MessageType.Ready.value)) # Ready
 
                 # --- DETECCIÓN DE SUBIDA OPTIMIZADA (START / VOLUME) ---
                 # Usamos el dedo medio (punto 12) como en tu código original
@@ -95,7 +106,7 @@ def main():
                         with m_estado_orquesta:
                             if estado_orquesta == "READY" and subida > 0.06:
                                 estado_orquesta = "PLAYING"
-                                send_gesture("START")
+                                send_gesture(bytes(MessageType.Start.value)) # Start
                                 historial_pos[h_idx] = [] # Limpiar para evitar doble disparo
                             elif estado_orquesta == "PLAYING":
                                 x_pulgar = current_smoothed[4][0]
@@ -109,7 +120,7 @@ def main():
 
                                 if d_pulgar_indice < 0.03:
                                     estado_orquesta = "READY"
-                                    send_gesture("STOP")
+                                    send_gesture(bytes(MessageType.Stop.value)) # Stop
                                     historial_pos[h_idx] = [] # Limpiar para evitar doble disparo
 
 
