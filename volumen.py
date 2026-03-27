@@ -8,6 +8,17 @@ import time
 import os
 from typing import Literal, TypedDict
 import socket
+from enum import Enum
+
+class MessageType(Enum):
+    Ready = 0,
+    Start = 1,
+    Stop = 2,
+    Calderon = 10,
+    OffCalderon = 11,
+    VolumeUp = 20,
+    VolumeDown = 21,
+    Tempo = 30
 
 class TManosProcesadas(TypedDict):
     landmarks: list[tuple[int, int, int]]
@@ -23,6 +34,10 @@ def main():
     client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     SERVER_ADDR = ("127.0.0.1", 5005)
     client_socket.connect(SERVER_ADDR)
+
+    def send_gesture(msg: bytes):
+        client_socket.sendall(msg)
+        print(f"TCP >> {str(msg)}")
 
     # --- MODELOS ---
     model_path_hand = "hand_landmarker.task"
@@ -130,14 +145,14 @@ def main():
                     if not es_palma:
 
                         if direccion_ver == DIR_ABJ_ARR and ahora - last_gestos[h_idx]['subir'] >= 1 and mano_nombre == MANO_IZQ:
-                            client_socket.sendall(b"VOLUME_UP")
+                            send_gesture(bytes(MessageType.VolumeUp.value)) # Volume Up
                             mensaje = f"Subir volumen"
                             last_gestos[h_idx]['subir'] = ahora
                             historial_pos[h_idx] = []
 
                 if es_palma:
                     if direccion_ver == DIR_ARR_ABJ and ahora - last_gestos[h_idx]['bajar'] >= 1 and mano_nombre == MANO_IZQ:
-                        client_socket.sendall(b"VOLUME_DOWN")
+                        send_gesture(bytes(MessageType.VolumeDown.value)) # Volume Down
                         mensaje = f"Bajar volumen"
                         last_gestos[h_idx]['bajar'] = ahora
                         historial_pos[h_idx] = []
