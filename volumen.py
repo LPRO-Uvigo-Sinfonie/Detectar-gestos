@@ -105,6 +105,7 @@ def main():
             label = handedness[h_idx][0].category_name
             mano_nombre = MANO_DER if label == "Left" else MANO_IZQ # Esta linea tiene sentido
             
+            # Ignoramos caso mano derecha
             if mano_nombre == MANO_DER:
                 continue
 
@@ -151,7 +152,7 @@ def main():
 
             # Ver si hay al menos 8 muestras que coincidan con dedos estirados/sin estirar
             if len(historial_pos[h_idx]) >= 8:
-                direccion_hor = obtener_direccion_hor(historial_pos[h_idx])
+                # direccion_hor = obtener_direccion_hor(historial_pos[h_idx])
                 direccion_ver = obtener_direccion_ver(historial_pos[h_idx])
                 ahora = time.time()
 
@@ -222,20 +223,20 @@ def main():
             return 0
         return min(max(int((PIXELES_REF_CERCA * 20) / pixeles), 10), 150)
     
-    @njit
-    def obtener_direccion_hor(historial: list[list[list[int]]]):
-        if len(historial) < 10:
-            return None
-        inicio = historial[0][0][0]
-        fin = historial[-1][0][0]
-        diferencia = fin - inicio
-        if abs(diferencia) < UMBRAL_DIRECCION:
-            return None
-        return DIR_IZQ_DER if diferencia > 0 else DIR_DER_IZQ
+    # @njit
+    # def obtener_direccion_hor(historial: list[list[list[int]]]):
+    #     if len(historial) < 10:
+    #         return None
+    #     inicio = historial[0][0][0]
+    #     fin = historial[-1][0][0]
+    #     diferencia = fin - inicio
+    #     if abs(diferencia) < UMBRAL_DIRECCION:
+    #         return None
+    #     return DIR_IZQ_DER if diferencia > 0 else DIR_DER_IZQ
     
     @njit
     def obtener_direccion_ver(historial: list[list[list[int]]]):
-        if len(historial) < 10:
+        if len(historial) < 8:
             return None
         inicio = historial[0][0][1]
         fin = historial[-1][0][1]
