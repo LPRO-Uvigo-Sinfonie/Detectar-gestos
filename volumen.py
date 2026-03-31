@@ -3,6 +3,7 @@ import mediapipe as mp
 from numba import njit
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
+from mediapipe.tasks.python.vision.core.image import Image
 import math
 import time
 import os
@@ -29,16 +30,24 @@ class TManosProcesadas(TypedDict):
 
 def main(): 
 
-    # --- UDP Cliente ---
+    # --- TCP/UDP Cliente ---
+    UDP = 0
+    TCP = 1
 
-    client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    mode = TCP # o UDP
+
+    client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM if mode == TCP else socket.SOCK_DGRAM)
     SERVER_ADDR = ("127.0.0.1", 5005)
-    client_socket.connect(SERVER_ADDR)
+
+    if mode == TCP:
+        client_socket.connect(SERVER_ADDR)
 
     def send_gesture(msg: bytes):
-        client_socket.sendall(msg)
+        if mode == TCP:
+            client_socket.sendall(msg)
+        else:
+            client_socket.sendto(msg, SERVER_ADDR)
         print(f"TCP >> {str(msg)}")
-
     # --- MODELOS ---
     model_path_hand = "hand_landmarker.task"
     model_path_pose = "pose_landmarker.task"
@@ -79,7 +88,9 @@ def main():
     UMBRAL_DIRECCION = 0.06
     PIXELES_REF_CERCA = 350
 
-    def process_hands(result_hand: HandLandmarkerResult, mp_image: image_lib.Image, timestamp_ms: int):
+    last_dedos_estirados = {'value': False }
+
+    def process_hands(result_hand: vision.HandLandmarkerResult, mp_image: Image, timestamp_ms: int):
         hands_landmarks = result_hand.hand_landmarks
         handedness = result_hand.handedness
 
@@ -94,6 +105,9 @@ def main():
             label = handedness[h_idx][0].category_name
             mano_nombre = MANO_DER if label == "Left" else MANO_IZQ # Esta linea tiene sentido
             
+            if mano_nombre == MANO_DER:
+                continue
+
             current_smoothed = []
             if h_idx in prev_hands and len(prev_hands[h_idx]) == len(hand):
                 for lm_idx, lm in enumerate(hand):
@@ -112,10 +126,7 @@ def main():
                 muneca_y = int(current_smoothed[0][1] * h_img)
                 posicion = "ARRIBA" if muneca_y < linea_codos_y else "ABAJO"
             
-            if mano_nombre == MANO_DER:
-                es_palma = current_smoothed[4][0] < current_smoothed[20][0]
-            else:
-                es_palma = current_smoothed[4][0] > current_smoothed[20][0]
+            es_palma = current_smoothed[4][0] > current_smoothed[20][0]
             
             dedos_estirados = (
                 current_smoothed[8][1] < current_smoothed[6][1] and
@@ -125,16 +136,21 @@ def main():
             )
             
             mensaje = None
-            
-            if dedos_estirados:
-                historial_pos[h_idx].append((current_smoothed[4], time.time()))
+        
+            historial_pos[h_idx].append((current_smoothed[4], time.time()))
 
-                if len(historial_pos[h_idx]) > 15:
-                    historial_pos[h_idx].pop(0)
-            else:
+            if len(historial_pos[h_idx]) > 15:
+                historial_pos[h_idx].pop(0)
+        
+            # Resetear historial al detectar un cambio de dedos estirados
+            if dedos_estirados != last_dedos_estirados["value"]:
                 historial_pos[h_idx] = []
-                
-            if len(historial_pos[h_idx]) >= 10:
+    
+            # print(last_dedos_estirados["value"], dedos_estirados)
+            last_dedos_estirados["value"] = dedos_estirados
+
+            # Ver si hay al menos 8 muestras que coincidan con dedos estirados/sin estirar
+            if len(historial_pos[h_idx]) >= 8:
                 direccion_hor = obtener_direccion_hor(historial_pos[h_idx])
                 direccion_ver = obtener_direccion_ver(historial_pos[h_idx])
                 ahora = time.time()
@@ -144,14 +160,14 @@ def main():
                         
                     if not es_palma:
 
-                        if direccion_ver == DIR_ABJ_ARR and ahora - last_gestos[h_idx]['subir'] >= 1 and mano_nombre == MANO_IZQ:
+                        if direccion_ver == DIR_ABJ_ARR and ahora - last_gestos[h_idx]['subir'] >= 1:
                             send_gesture(bytes(MessageType.VolumeUp.value)) # Volume Up
                             mensaje = f"Subir volumen"
                             last_gestos[h_idx]['subir'] = ahora
                             historial_pos[h_idx] = []
 
                 if es_palma:
-                    if direccion_ver == DIR_ARR_ABJ and ahora - last_gestos[h_idx]['bajar'] >= 1 and mano_nombre == MANO_IZQ:
+                    if direccion_ver == DIR_ARR_ABJ and ahora - last_gestos[h_idx]['bajar'] >= 1:
                         send_gesture(bytes(MessageType.VolumeDown.value)) # Volume Down
                         mensaje = f"Bajar volumen"
                         last_gestos[h_idx]['bajar'] = ahora
@@ -165,7 +181,7 @@ def main():
                 'nombre': mano_nombre,
                 'posicion': posicion,
                 'es_palma': es_palma,
-                'color': (0, 255, 255) if mano_nombre == MANO_DER else (255, 0, 255)
+                'color': (255, 0, 255)
             })
 
     options_hand = mp.tasks.vision.HandLandmarkerOptions(
@@ -228,13 +244,13 @@ def main():
             return None
         return DIR_ARR_ABJ if diferencia > 0 else DIR_ABJ_ARR
 
-    def calcular_linea_codos(pose_landmarks: list[landmark_lib.NormalizedLandmark], h_img: int):
-        if len(pose_landmarks) < 13:
-            return None
+    # def calcular_linea_codos(pose_landmarks: list[landmark_lib.NormalizedLandmark], h_img: int):
+    #     if len(pose_landmarks) < 13:
+    #         return None
 
-        y_izq = int(pose_landmarks[CODO_DER].y * h_img)
-        y_der = int(pose_landmarks[CODO_IZQ].y * h_img)
-        return (y_izq + y_der) // 2
+    #     y_izq = int(pose_landmarks[CODO_DER].y * h_img)
+    #     y_der = int(pose_landmarks[CODO_IZQ].y * h_img)
+    #     return (y_izq + y_der) // 2
     
     tiempo_anterior = time.time()
     while True:
