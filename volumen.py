@@ -9,9 +9,9 @@ import time
 import os
 from typing import Literal, TypedDict
 import socket
-from enum import Enum
+from enum import IntEnum
 
-class MessageType(Enum):
+class MessageType(IntEnum):
     Ready = 0,
     Start = 1,
     Stop = 2,
@@ -37,7 +37,7 @@ def main():
     mode = TCP # o UDP
 
     client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM if mode == TCP else socket.SOCK_DGRAM)
-    SERVER_ADDR = ("127.0.0.1", 5005)
+    SERVER_ADDR = ("localhost", 5005)
 
     if mode == TCP:
         client_socket.connect(SERVER_ADDR)
@@ -90,6 +90,10 @@ def main():
 
     last_dedos_estirados = {'value': False }
 
+    HEIGHT = 480
+    WIDTH = 640
+    FPS = 30
+
     def process_hands(result_hand: vision.HandLandmarkerResult, mp_image: Image, timestamp_ms: int):
         hands_landmarks = result_hand.hand_landmarks
         handedness = result_hand.handedness
@@ -140,7 +144,7 @@ def main():
         
             historial_pos[h_idx].append((current_smoothed[4], time.time()))
 
-            if len(historial_pos[h_idx]) > 15:
+            if len(historial_pos[h_idx]) > 30:
                 historial_pos[h_idx].pop(0)
         
             # Resetear historial al detectar un cambio de dedos estirados
@@ -162,14 +166,20 @@ def main():
                     if not es_palma:
 
                         if direccion_ver == DIR_ABJ_ARR and ahora - last_gestos[h_idx]['subir'] >= 1:
-                            send_gesture(bytes(MessageType.VolumeUp.value)) # Volume Up
+                            potencia = (historial_pos[h_idx][0][0][1] - historial_pos[h_idx][-1][0][1]) / historial_pos[h_idx][-1][0][1]
+                            potencia = int(round(max(min(potencia, 1.5) / 1.5, 0.1), 2) * 100)
+                            print(potencia)
+                            send_gesture(bytes([MessageType.VolumeUp.value, potencia])) # Volume Up
                             mensaje = f"Subir volumen"
                             last_gestos[h_idx]['subir'] = ahora
                             historial_pos[h_idx] = []
 
                 if es_palma:
                     if direccion_ver == DIR_ARR_ABJ and ahora - last_gestos[h_idx]['bajar'] >= 1:
-                        send_gesture(bytes(MessageType.VolumeDown.value)) # Volume Down
+                        potencia = (historial_pos[h_idx][-1][0][1] - historial_pos[h_idx][0][0][1]) / historial_pos[h_idx][0][0][1]
+                        potencia = int(round(max(min(potencia, 1.5) / 1.5, 0.1), 2) * 100)
+                        print(potencia)
+                        send_gesture(bytes([MessageType.VolumeDown.value, potencia])) # Volume Down
                         mensaje = f"Bajar volumen"
                         last_gestos[h_idx]['bajar'] = ahora
                         historial_pos[h_idx] = []
@@ -211,9 +221,9 @@ def main():
     
     print(f"Resolución actual: {int(cap.get(3))}x{int(cap.get(4))}")
     
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-    cap.set(cv2.CAP_PROP_FPS, 30)
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, WIDTH)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, HEIGHT)
+    cap.set(cv2.CAP_PROP_FPS, FPS)
     
     print(f"Resolución final: {int(cap.get(3))}x{int(cap.get(4))} @ {int(cap.get(5))}FPS")
     
@@ -233,7 +243,6 @@ def main():
     #     if abs(diferencia) < UMBRAL_DIRECCION:
     #         return None
     #     return DIR_IZQ_DER if diferencia > 0 else DIR_DER_IZQ
-    
     @njit
     def obtener_direccion_ver(historial: list[list[list[int]]]):
         if len(historial) < 8:
