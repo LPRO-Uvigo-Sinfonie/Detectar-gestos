@@ -20,14 +20,23 @@ class MessageType(Enum):
     VolumeDown = 21,
     Tempo = 30
 
-# Configuración TCP
-TCP_IP = "127.0.0.1"
-TCP_PORT = 5005
-sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-sock.connect((TCP_IP, TCP_PORT))
+# --- TCP/UDP Cliente ---
+UDP = 0
+TCP = 1
+
+mode = TCP # o UDP
+
+client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM if mode == TCP else socket.SOCK_DGRAM)
+SERVER_ADDR = ("127.0.0.1", 5005)
+
+if mode == TCP:
+    client_socket.connect(SERVER_ADDR)
 
 def send_gesture(msg: bytes):
-    sock.sendall(msg)
+    if mode == TCP:
+        client_socket.sendall(msg)
+    else:
+        client_socket.sendto(msg, SERVER_ADDR)
     print(f"TCP >> {str(msg)}")
 
 # Esto queda aquí porque dentro de main no funciona :(
