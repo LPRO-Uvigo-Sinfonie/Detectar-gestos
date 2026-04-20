@@ -45,6 +45,25 @@ def main():
     prev_hands = {}
     historial_pos_derecha = [] # Para el latigazo de START
 
+    historial_pos_izquierda = {0: [], 1: []}
+    
+    UMBRAL_DIRECCION = 0.06
+    DIR_ABJ_ARR = 0
+    DIR_ARR_ABJ = 1
+
+    last_dedos_estirados = {'value': False }
+
+    def obtener_direccion_ver(historial: list[list[list[int]]]):
+        if len(historial) < 8:
+            return None
+        inicio = historial[0][0][1]
+        fin = historial[-1][0][1]
+        diferencia = fin - inicio
+        if abs(diferencia) < UMBRAL_DIRECCION:
+            return None
+        return DIR_ARR_ABJ if diferencia > 0 else DIR_ABJ_ARR
+
+
     def process_hands(result_hand, mp_image, timestamp_ms):
         global estado_orquesta, volumenSuavizado, last_time_vol
         
@@ -84,11 +103,52 @@ def main():
                 with m_estado_orquesta:
                     # --- MANO IZQUIERDA: CONTROL DE VOLUMEN ---
                     if mano_nombre == "IZQUIERDA" and estado_orquesta == "PLAYING":
-                        posI_y = 1.0 - current_smoothed[8][1] # Invertir eje Y
-                        factorVol = max(0.0, min(1.0, (posI_y - 0.2) / 0.6))
-                        volTarget = factorVol ** 2
-                        volumenSuavizado += (volTarget - volumenSuavizado) * min(1.0, dt * inerciaVolumen)
-                        send_gesture(f"VOL:{volumenSuavizado:.3f}")
+                        
+                        es_palma = current_smoothed[4][0] > current_smoothed[20][0]
+                        
+                        dedos_estirados = (
+                            current_smoothed[8][1] < current_smoothed[6][1] and
+                            current_smoothed[12][1] < current_smoothed[10][1] and
+                            current_smoothed[16][1] < current_smoothed[14][1] and
+                            current_smoothed[20][1] < current_smoothed[18][1]
+                        )
+                                            
+                        historial_pos_izquierda[h_idx].append((current_smoothed[4], time.time()))
+
+                        if len(historial_pos_izquierda[h_idx]) > 30:
+                            historial_pos_izquierda[h_idx].pop(0)
+                    
+                        # Resetear historial al detectar un cambio de dedos estirados
+                        if dedos_estirados != last_dedos_estirados["value"]:
+                            historial_pos_izquierda[h_idx] = []
+                
+                        # print(last_dedos_estirados["value"], dedos_estirados)
+                        last_dedos_estirados["value"] = dedos_estirados
+
+                        # Ver si hay al menos 8 muestras que coincidan con dedos estirados/sin estirar
+                        if len(historial_pos_izquierda[h_idx]) >= 5:
+                            # direccion_hor = obtener_direccion_hor(historial_pos[h_idx])
+                            direccion_ver = obtener_direccion_ver(historial_pos_izquierda[h_idx])
+
+                        # Detección gestos
+                            if dedos_estirados:
+                                    
+                                if not es_palma:
+
+                                    if direccion_ver == DIR_ABJ_ARR:
+                                        posI_y = 1.0 - current_smoothed[8][1] # Invertir eje Y
+                                        factorVol = max(0.0, min(1.0, (posI_y - 0.2) / 0.6))
+                                        volTarget = factorVol ** 2
+                                        volumenSuavizado += (volTarget - volumenSuavizado) * min(1.0, dt * inerciaVolumen)
+                                        send_gesture(f"VOL:{volumenSuavizado:.3f}")
+
+                            if es_palma:
+                                if direccion_ver == DIR_ARR_ABJ:
+                                    posI_y = 1.0 - current_smoothed[8][1] # Invertir eje Y
+                                    factorVol = max(0.0, min(1.0, (posI_y - 0.2) / 0.6))
+                                    volTarget = factorVol ** 2
+                                    volumenSuavizado += (volTarget - volumenSuavizado) * min(1.0, dt * inerciaVolumen)
+                                    send_gesture(f"VOL:{volumenSuavizado:.3f}")
 
                     # --- MANO DERECHA: START Y STOP ---
                     if mano_nombre == "DERECHA":
