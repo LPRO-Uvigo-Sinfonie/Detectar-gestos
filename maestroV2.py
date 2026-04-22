@@ -4,23 +4,37 @@ import math
 import time
 import socket
 from multiprocessing import Lock
+from enum import IntEnum
 
-# --- Configuracion TCP ---
-TCP_IP = "127.0.0.1"
-TCP_PORT = 5005
-sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-try:
-    sock.connect((TCP_IP, TCP_PORT))
-    print("Conectado a Unity con exito.")
-except Exception as e:
-    print(f"Error conectando a Unity: {e}")
+class MessageType(IntEnum):
+    Ready = 0,
+    Start = 1,
+    Stop = 2,
+    Calderon = 10,
+    OffCalderon = 11,
+    VolumeUp = 20,
+    VolumeDown = 21,
+    Volume = 22,
+    Tempo = 30
 
-def send_gesture(msg):
-    try:
-        sock.sendall(msg.encode())
-        print(f"TCP >> {msg}")
-    except:
-        pass
+# --- TCP/UDP Cliente ---
+UDP = 0
+TCP = 1
+
+mode = UDP # o UDP
+
+sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM if mode == TCP else socket.SOCK_DGRAM)
+SERVER_ADDR = ("localhost", 8090)
+
+if mode == TCP:
+    sock.connect(SERVER_ADDR)
+
+def send_gesture(msg: bytes):
+    if mode == TCP:
+        sock.sendall(msg)
+    else:
+        sock.sendto(msg, SERVER_ADDR)
+    print(f"TCP >> {str(msg)}")
 
 # --- Variables Globales y Sincronizacion ---
 m_estado_orquesta = Lock()
@@ -43,10 +57,10 @@ def main():
     # Parametros de suavizado y deteccion
     ALPHA = 0.65
     prev_hands = {}
-    historial_pos_derecha = [] # Para el latigazo de START
 
-    historial_pos_izquierda = {0: [], 1: []}
-    
+    historial_pos = {0: [], 1: []}
+    m_historial_pos = Lock()
+
     UMBRAL_DIRECCION = 0.06
     DIR_ABJ_ARR = 0
     DIR_ARR_ABJ = 1
@@ -82,108 +96,113 @@ def main():
 
                 # 1. Suavizado de puntos (EMA)
                 current_smoothed = []
-                if h_idx in prev_hands:
-                    for i, lm in enumerate(hand):
-                        prev = prev_hands[h_idx][i]
-                        current_smoothed.append((ALPHA*lm.x + (1-ALPHA)*prev[0], ALPHA*lm.y + (1-ALPHA)*prev[1]))
+                if h_idx in prev_hands and len(prev_hands[h_idx]) == len(hand):
+                    for lm_idx, lm in enumerate(hand):
+                        prev_lm = prev_hands[h_idx][lm_idx]
+                        x_s = ALPHA * lm.x + (1 - ALPHA) * prev_lm[0]
+                        y_s = ALPHA * lm.y + (1 - ALPHA) * prev_lm[1]
+                        z_s = ALPHA * lm.z + (1 - ALPHA) * prev_lm[2]
+                        current_smoothed.append((x_s, y_s, z_s))
                 else:
-                    current_smoothed = [(lm.x, lm.y) for lm in hand]
+                    current_smoothed = [(lm.x, lm.y, lm.z) for lm in hand]
+                
                 prev_hands[h_idx] = current_smoothed
 
                 # 2. Posicion de la muneca para estados
                 muneca_y = current_smoothed[0][1]
+
+                en_zona_media = False
                 with m_limites:
-                    en_zona = altura_pecho_y < muneca_y < altura_cadera_y
-                    bajo_cadera = muneca_y >= altura_cadera_y
-                
-                if en_zona: manos_en_zona_media += 1
-                if bajo_cadera: manos_bajo_cadera += 1
+                    en_zona_media = altura_pecho_y < muneca_y < altura_cadera_y
 
                 # 3. Logica especifica por mano
-                with m_estado_orquesta:
-                    # --- MANO IZQUIERDA: CONTROL DE VOLUMEN ---
-                    if mano_nombre == "IZQUIERDA" and estado_orquesta == "PLAYING":
-                        
-                        es_palma = current_smoothed[4][0] > current_smoothed[20][0]
-                        
-                        dedos_estirados = (
-                            current_smoothed[8][1] < current_smoothed[6][1] and
-                            current_smoothed[12][1] < current_smoothed[10][1] and
-                            current_smoothed[16][1] < current_smoothed[14][1] and
-                            current_smoothed[20][1] < current_smoothed[18][1]
-                        )
-                                            
-                        historial_pos_izquierda[h_idx].append((current_smoothed[4], time.time()))
 
-                        if len(historial_pos_izquierda[h_idx]) > 30:
-                            historial_pos_izquierda[h_idx].pop(0)
+                if en_zona_media and estado_orquesta == "IDLE":
+                    estado_orquesta = "READY"
+                    send_gesture(bytes(MessageType.Ready.value)) # Ready
+
+                # --- MANO IZQUIERDA: CONTROL DE VOLUMEN ---
+                if mano_nombre == "IZQUIERDA" and estado_orquesta == "PLAYING":
                     
-                        # Resetear historial al detectar un cambio de dedos estirados
-                        if dedos_estirados != last_dedos_estirados["value"]:
-                            historial_pos_izquierda[h_idx] = []
+                    es_palma = current_smoothed[4][0] > current_smoothed[20][0]
+                    
+                    dedos_estirados = (
+                        current_smoothed[8][1] < current_smoothed[6][1] and
+                        current_smoothed[12][1] < current_smoothed[10][1] and
+                        current_smoothed[16][1] < current_smoothed[14][1] and
+                        current_smoothed[20][1] < current_smoothed[18][1]
+                    )
+                                        
+                    historial_pos[h_idx].append((current_smoothed[4], time.time()))
+
+                    if len(historial_pos[h_idx]) > 30:
+                        historial_pos[h_idx].pop(0)
                 
-                        # print(last_dedos_estirados["value"], dedos_estirados)
-                        last_dedos_estirados["value"] = dedos_estirados
+                    # Resetear historial al detectar un cambio de dedos estirados
+                    if dedos_estirados != last_dedos_estirados["value"]:
+                        historial_pos[h_idx] = []
+            
+                    # print(last_dedos_estirados["value"], dedos_estirados)
+                    last_dedos_estirados["value"] = dedos_estirados
 
-                        # Ver si hay al menos 8 muestras que coincidan con dedos estirados/sin estirar
-                        if len(historial_pos_izquierda[h_idx]) >= 5:
-                            # direccion_hor = obtener_direccion_hor(historial_pos[h_idx])
-                            direccion_ver = obtener_direccion_ver(historial_pos_izquierda[h_idx])
+                    # Ver si hay al menos 5 muestras que coincidan con dedos estirados/sin estirar
+                    if len(historial_pos[h_idx]) >= 5:
+                        # direccion_hor = obtener_direccion_hor(historial_pos[h_idx])
+                        direccion_ver = obtener_direccion_ver(historial_pos[h_idx])
 
-                        # Detección gestos
-                            if dedos_estirados:
-                                    
-                                if not es_palma:
+                    # Detección gestos
+                        if dedos_estirados:
+                                
+                            if not es_palma:
 
-                                    if direccion_ver == DIR_ABJ_ARR:
-                                        posI_y = 1.0 - current_smoothed[8][1] # Invertir eje Y
-                                        factorVol = max(0.0, min(1.0, (posI_y - 0.2) / 0.6))
-                                        volTarget = factorVol ** 2
-                                        volumenSuavizado += (volTarget - volumenSuavizado) * min(1.0, dt * inerciaVolumen)
-                                        send_gesture(f"VOL:{volumenSuavizado:.3f}")
-
-                            if es_palma:
-                                if direccion_ver == DIR_ARR_ABJ:
+                                if direccion_ver == DIR_ABJ_ARR:
                                     posI_y = 1.0 - current_smoothed[8][1] # Invertir eje Y
                                     factorVol = max(0.0, min(1.0, (posI_y - 0.2) / 0.6))
                                     volTarget = factorVol ** 2
                                     volumenSuavizado += (volTarget - volumenSuavizado) * min(1.0, dt * inerciaVolumen)
-                                    send_gesture(f"VOL:{volumenSuavizado:.3f}")
+                                    send_gesture(bytes([MessageType.Volume.value, round(volumenSuavizado * 100)]))
 
-                    # --- MANO DERECHA: START Y STOP ---
-                    if mano_nombre == "DERECHA":
-                        # Deteccion de START (Latigazo hacia arriba)
-                        dedo_y = current_smoothed[12][1]
-                        historial_pos_derecha.append(dedo_y)
-                        if len(historial_pos_derecha) > 8: historial_pos_derecha.pop(0)
+                        if es_palma:
+                            if direccion_ver == DIR_ARR_ABJ:
+                                posI_y = 1.0 - current_smoothed[8][1] # Invertir eje Y
+                                factorVol = max(0.0, min(1.0, (posI_y - 0.2) / 0.6))
+                                volTarget = factorVol ** 2
+                                volumenSuavizado += (volTarget - volumenSuavizado) * min(1.0, dt * inerciaVolumen)
+                                send_gesture(bytes([MessageType.Volume.value, round(volumenSuavizado * 100)]))
 
-                        if estado_orquesta == "READY" and len(historial_pos_derecha) >= 5:
-                            subida = historial_pos_derecha[0] - historial_pos_derecha[-1]
-                            if subida > 0.06:
+                # --- MANO DERECHA: START Y STOP ---
+                if mano_nombre == "DERECHA":
+                    dedo_y = current_smoothed[12][1]
+                    historial_pos[h_idx].append(((0, dedo_y, 0), time.time()))
+
+                    # Reducimos el historial a 8 para más velocidad de respuesta
+                    if len(historial_pos[h_idx]) > 8: historial_pos[h_idx].pop(0)
+
+                    if len(historial_pos[h_idx]) >= 5:
+                        # Calculamos la subida (valor inicial Y - valor final Y)
+                        # En MediaPipe, subir es que Y disminuya, por eso inicial - final
+                        subida = historial_pos[h_idx][0][0][1] - historial_pos[h_idx][-1][0][1]
+
+                        # START: Sensibilidad alta (0.06 es suficiente para un latigazo)
+                        with m_estado_orquesta:
+                            if estado_orquesta == "READY" and subida > 0.06:
                                 estado_orquesta = "PLAYING"
-                                send_gesture("START")
-                                historial_pos_derecha.clear()
+                                send_gesture(bytes(MessageType.Start.value)) # Start
+                                historial_pos[h_idx] = [] # Limpiar para evitar doble disparo
+                            elif estado_orquesta == "PLAYING":
+                                x_pulgar = current_smoothed[4][0]
+                                y_pulgar = current_smoothed[4][1]
 
-                        # Deteccion de STOP (Gesto de pinza)
-                        elif estado_orquesta == "PLAYING":
-                            # Distancia entre punta pulgar (4) e indice (8)
-                            dist = math.sqrt((current_smoothed[4][0] - current_smoothed[8][0])**2 + 
-                                             (current_smoothed[4][1] - current_smoothed[8][1])**2)
-                            if dist < 0.03:
-                                estado_orquesta = "STOP"
-                                send_gesture("STOP")
+                                x_indice = current_smoothed[8][0]
+                                y_indice = current_smoothed[8][1]
 
-            # 4. Transiciones globales de estado (READY / IDLE)
-            with m_estado_orquesta:
-                # Si estamos en IDLE y subimos al menos una mano al medio
-                if estado_orquesta == "IDLE" and manos_en_zona_media >= 1:
-                    estado_orquesta = "READY"
-                    send_gesture("READY")
-                
-                # Si bajamos las manos estando en READY o tras un STOP
-                elif (estado_orquesta == "READY" or estado_orquesta == "STOP") and manos_bajo_cadera >= 1:
-                    estado_orquesta = "IDLE"
-                    send_gesture("IDLE")
+                                # distancia de vectores
+                                d_pulgar_indice = math.sqrt(((x_pulgar - x_indice)**2) + ((y_pulgar - y_indice)**2))
+
+                                if d_pulgar_indice < 0.03:
+                                    estado_orquesta = "READY"
+                                    send_gesture(bytes(MessageType.Stop.value)) # Stop
+                                    historial_pos[h_idx] = [] # Limpiar para evitar doble disparo
 
     # --- Configuracion de Tareas de Mediapipe ---
     BaseOptions = mp.tasks.BaseOptions
