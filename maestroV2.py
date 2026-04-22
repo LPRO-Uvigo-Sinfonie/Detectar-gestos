@@ -21,7 +21,7 @@ class MessageType(IntEnum):
 UDP = 0
 TCP = 1
 
-mode = UDP # o UDP
+mode = TCP # o UDP
 
 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM if mode == TCP else socket.SOCK_DGRAM)
 SERVER_ADDR = ("localhost", 8090)
@@ -119,7 +119,7 @@ def main():
 
                 if en_zona_media and estado_orquesta == "IDLE":
                     estado_orquesta = "READY"
-                    send_gesture(bytes(MessageType.Ready.value)) # Ready
+                    send_gesture(bytes([MessageType.Ready.value])) # Ready
 
                 # --- MANO IZQUIERDA: CONTROL DE VOLUMEN ---
                 if mano_nombre == "IZQUIERDA" and estado_orquesta == "PLAYING":
@@ -187,7 +187,7 @@ def main():
                         with m_estado_orquesta:
                             if estado_orquesta == "READY" and subida > 0.06:
                                 estado_orquesta = "PLAYING"
-                                send_gesture(bytes(MessageType.Start.value)) # Start
+                                send_gesture(bytes([MessageType.Start.value])) # Start
                                 historial_pos[h_idx] = [] # Limpiar para evitar doble disparo
                             elif estado_orquesta == "PLAYING":
                                 x_pulgar = current_smoothed[4][0]
@@ -201,7 +201,7 @@ def main():
 
                                 if d_pulgar_indice < 0.03:
                                     estado_orquesta = "READY"
-                                    send_gesture(bytes(MessageType.Stop.value)) # Stop
+                                    send_gesture(bytes([MessageType.Ready.value])) # Stop
                                     historial_pos[h_idx] = [] # Limpiar para evitar doble disparo
 
     # --- Configuracion de Tareas de Mediapipe ---
