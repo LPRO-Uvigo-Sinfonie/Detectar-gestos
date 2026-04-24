@@ -5,6 +5,7 @@ import time
 import socket
 from multiprocessing import Lock
 from enum import IntEnum
+import time
 
 class MessageType(IntEnum):
     Ready = 0,
@@ -21,7 +22,7 @@ class MessageType(IntEnum):
 UDP = 0
 TCP = 1
 
-mode = TCP # o UDP
+mode = UDP # o UDP
 
 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM if mode == TCP else socket.SOCK_DGRAM)
 SERVER_ADDR = ("localhost", 8090)
@@ -116,10 +117,18 @@ def main():
                     en_zona_media = altura_pecho_y < muneca_y < altura_cadera_y
 
                 # 3. Logica especifica por mano
-
-                if en_zona_media and estado_orquesta == "IDLE":
-                    estado_orquesta = "READY"
-                    send_gesture(bytes([MessageType.Ready.value])) # Ready
+                #if muneca_y > altura_cadera_y and estado_orquesta == "READY":
+                #    estado_orquesta = "IDLE"
+                if muneca_y > altura_cadera_y and estado_orquesta == "STOP":
+                    estado_orquesta = "IDLE"
+                    
+                elif en_zona_media and estado_orquesta == "IDLE":
+                    time.sleep(1)
+                    
+                    if en_zona_media and estado_orquesta == "IDLE":
+                      estado_orquesta = "READY"
+                      send_gesture(bytes([MessageType.Ready.value])) # Ready
+                      #time.sleep(1/2.0)
 
                 # --- MANO IZQUIERDA: CONTROL DE VOLUMEN ---
                 if mano_nombre == "IZQUIERDA" and estado_orquesta == "PLAYING":
@@ -185,7 +194,7 @@ def main():
 
                         # START: Sensibilidad alta (0.06 es suficiente para un latigazo)
                         with m_estado_orquesta:
-                            if estado_orquesta == "READY" and subida > 0.06:
+                            if estado_orquesta == "READY" and subida > 0.26:
                                 estado_orquesta = "PLAYING"
                                 send_gesture(bytes([MessageType.Start.value])) # Start
                                 historial_pos[h_idx] = [] # Limpiar para evitar doble disparo
@@ -200,8 +209,8 @@ def main():
                                 d_pulgar_indice = math.sqrt(((x_pulgar - x_indice)**2) + ((y_pulgar - y_indice)**2))
 
                                 if d_pulgar_indice < 0.03:
-                                    estado_orquesta = "READY"
-                                    send_gesture(bytes([MessageType.Ready.value])) # Stop
+                                    estado_orquesta = "STOP"
+                                    send_gesture(bytes([MessageType.Stop.value])) # Stop
                                     historial_pos[h_idx] = [] # Limpiar para evitar doble disparo
 
     # --- Configuracion de Tareas de Mediapipe ---
@@ -238,16 +247,18 @@ def main():
         if result_pose.pose_landmarks:
             lm = result_pose.pose_landmarks[0]
             y_hombros = (lm[11].y + lm[12].y) / 2
-            y_cadera = (lm[23].y + lm[24].y) / 2
+            y_cadera = ((lm[23].y + lm[24].y) / 2)
             
-            with m_limites:
-                global altura_pecho_y, altura_cadera_y
-                # Calculo de lineas de referencia
-                altura_pecho_y = y_hombros + (y_cadera - y_hombros) * 0.35
-                altura_cadera_y = y_cadera
-                # Dibujar guias visuales
-                cv2.line(frame, (0, int(altura_pecho_y*h_img)), (w_img, int(altura_pecho_y*h_img)), (0, 255, 255), 2)
-                cv2.line(frame, (0, int(altura_cadera_y*h_img)), (w_img, int(altura_cadera_y*h_img)), (0, 0, 255), 2)
+      
+            if estado_orquesta != "PLAYING" and estado_orquesta != "STOP":
+                 with m_limites:
+                    global altura_pecho_y, altura_cadera_y
+                    # Calculo de lineas de referencia
+                    altura_pecho_y = y_hombros + (y_cadera - y_hombros) * 0.35
+                    altura_cadera_y = y_cadera - 0.1
+                    # Dibujar guias visuales
+                    cv2.line(frame, (0, int(altura_pecho_y*h_img)), (w_img, int(altura_pecho_y*h_img)), (0, 255, 255), 2)
+                    cv2.line(frame, (0, int(altura_cadera_y*h_img)), (w_img, int(altura_cadera_y*h_img)), (0, 0, 255), 2)
 
         # 2. Deteccion de Manos (Asincrona)
         detector_hand.detect_async(mp_image, timestamp_ms)
