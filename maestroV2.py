@@ -5,7 +5,6 @@ import time
 import socket
 from multiprocessing import Lock
 from enum import IntEnum
-import time
 
 class MessageType(IntEnum):
     Ready = 0,
@@ -40,6 +39,7 @@ def send_gesture(msg: bytes):
 # --- Variables Globales y Sincronizacion ---
 m_estado_orquesta = Lock()
 estado_orquesta = "IDLE"
+tiempo_entrada_zona = 0
 
 # Volumen (Mano Izquierda)
 volumenSuavizado = 0.5
@@ -80,8 +80,8 @@ def main():
 
 
     def process_hands(result_hand, mp_image, timestamp_ms):
-        global estado_orquesta, volumenSuavizado, last_time_vol
-        
+        global estado_orquesta, volumenSuavizado, last_time_vol, tiempo_entrada_zona
+
         current_time = time.time()
         dt = current_time - last_time_vol
         last_time_vol = current_time
@@ -89,7 +89,7 @@ def main():
         if result_hand.hand_landmarks:
             manos_en_zona_media = 0
             manos_bajo_cadera = 0
-            
+
             for h_idx, hand in enumerate(result_hand.hand_landmarks):
                 # En modo espejo (flip 1), "Left" es la mano derecha del usuario
                 label = result_hand.handedness[h_idx][0].category_name
@@ -106,7 +106,7 @@ def main():
                         current_smoothed.append((x_s, y_s, z_s))
                 else:
                     current_smoothed = [(lm.x, lm.y, lm.z) for lm in hand]
-                
+
                 prev_hands[h_idx] = current_smoothed
 
                 # 2. Posicion de la muneca para estados
@@ -121,36 +121,38 @@ def main():
                 #    estado_orquesta = "IDLE"
                 if muneca_y > altura_cadera_y and estado_orquesta == "STOP":
                     estado_orquesta = "IDLE"
-                    
+
                 elif en_zona_media and estado_orquesta == "IDLE":
-                    time.sleep(1)
-                    
-                    if en_zona_media and estado_orquesta == "IDLE":
+                    if tiempo_entrada_zona == 0:
+                        tiempo_entrada_zona = time.time()
+
+                    elif en_zona_media and time.time() - tiempo_entrada_zona > 4:
                       estado_orquesta = "READY"
                       send_gesture(bytes([MessageType.Ready.value])) # Ready
-                      #time.sleep(1/2.0)
+                else:
+                    tiempo_entrada_zona = 0
 
                 # --- MANO IZQUIERDA: CONTROL DE VOLUMEN ---
                 if mano_nombre == "IZQUIERDA" and estado_orquesta == "PLAYING":
-                    
+
                     es_palma = current_smoothed[4][0] > current_smoothed[20][0]
-                    
+
                     dedos_estirados = (
                         current_smoothed[8][1] < current_smoothed[6][1] and
                         current_smoothed[12][1] < current_smoothed[10][1] and
                         current_smoothed[16][1] < current_smoothed[14][1] and
                         current_smoothed[20][1] < current_smoothed[18][1]
                     )
-                                        
+
                     historial_pos[h_idx].append((current_smoothed[4], time.time()))
 
                     if len(historial_pos[h_idx]) > 30:
                         historial_pos[h_idx].pop(0)
-                
+
                     # Resetear historial al detectar un cambio de dedos estirados
                     if dedos_estirados != last_dedos_estirados["value"]:
                         historial_pos[h_idx] = []
-            
+
                     # print(last_dedos_estirados["value"], dedos_estirados)
                     last_dedos_estirados["value"] = dedos_estirados
 
@@ -161,7 +163,7 @@ def main():
 
                     # Detección gestos
                         if dedos_estirados:
-                                
+
                             if not es_palma:
 
                                 if direccion_ver == DIR_ABJ_ARR:
@@ -180,7 +182,7 @@ def main():
                                 send_gesture(bytes([MessageType.Volume.value, round(volumenSuavizado * 100)]))
 
                 # --- MANO DERECHA: START Y STOP ---
-                if mano_nombre == "DERECHA":
+                if mano_nombre == "IZQUIERDA":
                     dedo_y = current_smoothed[12][1]
                     historial_pos[h_idx].append(((0, dedo_y, 0), time.time()))
 
@@ -216,13 +218,13 @@ def main():
     # --- Configuracion de Tareas de Mediapipe ---
     BaseOptions = mp.tasks.BaseOptions
     VisionRunningMode = mp.tasks.vision.RunningMode
-    
+
     options_hand = mp.tasks.vision.HandLandmarkerOptions(
         base_options=BaseOptions(model_asset_path=model_path_hand),
-        running_mode=VisionRunningMode.LIVE_STREAM, 
-        num_hands=2, 
+        running_mode=VisionRunningMode.LIVE_STREAM,
+        num_hands=2,
         result_callback=process_hands)
-    
+
     options_pose = mp.tasks.vision.PoseLandmarkerOptions(
         base_options=BaseOptions(model_asset_path=model_path_pose),
         running_mode=VisionRunningMode.VIDEO)
@@ -248,8 +250,8 @@ def main():
             lm = result_pose.pose_landmarks[0]
             y_hombros = (lm[11].y + lm[12].y) / 2
             y_cadera = ((lm[23].y + lm[24].y) / 2)
-            
-      
+
+
             if estado_orquesta != "PLAYING" and estado_orquesta != "STOP":
                  with m_limites:
                     global altura_pecho_y, altura_cadera_y
@@ -265,14 +267,14 @@ def main():
 
         # 3. Interfaz de Usuario
         with m_estado_orquesta:
-            cv2.putText(frame, f"ESTADO: {estado_orquesta}", (10, 50), 
+            cv2.putText(frame, f"ESTADO: {estado_orquesta}", (10, 50),
                         cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
             if estado_orquesta == "PLAYING":
-                cv2.putText(frame, f"VOL: {int(volumenSuavizado*100)}%", (10, 90), 
+                cv2.putText(frame, f"VOL: {int(volumenSuavizado*100)}%", (10, 90),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
 
         cv2.imshow("Director Console", frame)
-        if cv2.waitKey(1) & 0xFF == ord('q'): 
+        if cv2.waitKey(1) & 0xFF == ord('q'):
             break
 
     cap.release()
