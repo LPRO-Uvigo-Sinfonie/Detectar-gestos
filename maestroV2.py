@@ -40,6 +40,7 @@ def send_gesture(msg: bytes):
 m_estado_orquesta = Lock()
 estado_orquesta = "IDLE"
 tiempo_entrada_zona = 0
+frames_stop = 0
 
 # Volumen (Mano Izquierda)
 volumenSuavizado = 0.5
@@ -60,6 +61,7 @@ def main():
     prev_hands = {}
 
     historial_pos = {0: [], 1: []}
+    historial_pos_muneca = {0: [], 1: []}
     m_historial_pos = Lock()
 
     UMBRAL_DIRECCION = 0.06
@@ -80,7 +82,7 @@ def main():
 
 
     def process_hands(result_hand, mp_image, timestamp_ms):
-        global estado_orquesta, volumenSuavizado, last_time_vol, tiempo_entrada_zona
+        global estado_orquesta, volumenSuavizado, last_time_vol, tiempo_entrada_zona, frames_stop
 
         current_time = time.time()
         dt = current_time - last_time_vol
@@ -183,8 +185,14 @@ def main():
 
                 # --- MANO DERECHA: START Y STOP ---
                 if mano_nombre == "IZQUIERDA":
+                    # Guardamos solo la posición actual de la muñeca (landmark 0) como (x, y)
+                    pos_actual = (current_smoothed[0][0], current_smoothed[0][1])
+                    historial_pos_muneca[h_idx].append(pos_actual)
                     dedo_y = current_smoothed[12][1]
                     historial_pos[h_idx].append(((0, dedo_y, 0), time.time()))
+
+                    if len(historial_pos_muneca[h_idx]) > 30:
+                        historial_pos_muneca[h_idx].pop(0)
 
                     # Reducimos el historial a 8 para más velocidad de respuesta
                     if len(historial_pos[h_idx]) > 8: historial_pos[h_idx].pop(0)
@@ -210,10 +218,33 @@ def main():
                                 # distancia de vectores
                                 d_pulgar_indice = math.sqrt(((x_pulgar - x_indice)**2) + ((y_pulgar - y_indice)**2))
 
-                                if d_pulgar_indice < 0.03:
-                                    estado_orquesta = "STOP"
-                                    send_gesture(bytes([MessageType.Stop.value])) # Stop
-                                    historial_pos[h_idx] = [] # Limpiar para evitar doble disparo
+
+                                # Detectar circulo (varianza en X e Y)
+                                if len(historial_pos_muneca[h_idx]) >= 20:
+                                    xs = [p[0] for p in historial_pos_muneca[h_idx]]
+                                    ys = [p[1] for p in historial_pos_muneca[h_idx]]
+                                    # Si hay suficiente dispersión en ambos ejes, asumimos movimiento circular
+                                    es_circulo = (max(xs) - min(xs) > 0.15) and (max(ys) - min(ys) > 0.15)
+
+                                    # Distancia dedos
+                                    d_pulgar_indice = math.sqrt(((current_smoothed[4][0]-current_smoothed[8][0])**2) +
+                                                                ((current_smoothed[4][1]-current_smoothed[8][1])**2))
+
+                                    # STOP
+                                    if es_circulo and d_pulgar_indice < 0.04:
+                                        frames_stop += 1
+                                    else:
+                                        frames_stop = 0
+
+                                    if frames_stop > 10:
+                                        estado_orquesta = "STOP"
+                                        send_gesture(bytes([MessageType.Stop.value]))
+                                        historial_pos_muneca[h_idx] = []
+                                        frames_stop = 0
+#                                if d_pulgar_indice < 0.03:
+#                                    estado_orquesta = "STOP"
+#                                    send_gesture(bytes([MessageType.Stop.value])) # Stop
+#                                    historial_pos[h_idx] = [] # Limpiar para evitar doble disparo
 
     # --- Configuracion de Tareas de Mediapipe ---
     BaseOptions = mp.tasks.BaseOptions
