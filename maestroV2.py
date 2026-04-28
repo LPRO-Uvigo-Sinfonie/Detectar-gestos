@@ -40,7 +40,6 @@ def send_gesture(msg: bytes):
 m_estado_orquesta = Lock()
 estado_orquesta = "IDLE"
 tiempo_entrada_zona = 0
-frames_stop = 0
 
 # Volumen (Mano Izquierda)
 volumenSuavizado = 0.5
@@ -51,6 +50,11 @@ inerciaVolumen = 8.0
 m_limites = Lock()
 altura_pecho_y = 0.4
 altura_cadera_y = 0.8
+
+# STOP
+historial_muneca_izquierda = []
+frames_stop = 0
+last_stop_time = 0
 
 def main():
     model_path_hand = "hand_landmarker.task"
@@ -82,7 +86,7 @@ def main():
 
 
     def process_hands(result_hand, mp_image, timestamp_ms):
-        global estado_orquesta, volumenSuavizado, last_time_vol, tiempo_entrada_zona, frames_stop
+        global estado_orquesta, volumenSuavizado, last_time_vol, tiempo_entrada_zona, frames_stop, last_stop_time, historial_muneca_izquierda
 
         current_time = time.time()
         dt = current_time - last_time_vol
@@ -128,15 +132,60 @@ def main():
                     if tiempo_entrada_zona == 0:
                         tiempo_entrada_zona = time.time()
 
-                    elif en_zona_media and time.time() - tiempo_entrada_zona > 4:
+                    elif en_zona_media and time.time() - tiempo_entrada_zona > 3:
                       estado_orquesta = "READY"
-                      send_gesture(bytes([MessageType.Ready.value])) # Ready
+                      send_gesture(bytes([MessageType.Ready.value]))
                 else:
                     tiempo_entrada_zona = 0
 
                 # --- MANO IZQUIERDA: CONTROL DE VOLUMEN ---
                 if mano_nombre == "IZQUIERDA" and estado_orquesta == "PLAYING":
+                    # Para el STOP
+                    pos_muneca = (current_smoothed[0][0], current_smoothed[0][1])
+                    historial_muneca_izquierda.append(pos_muneca)
+                     
+                    if len(historial_muneca_izquierda) > 30:
+                        historial_muneca_izquierda.pop(0)
 
+                    x_p, y_p = current_smoothed[4][0], current_smoothed[4][1]
+                    x_i, y_i = current_smoothed[8][0], current_smoothed[8][1]
+
+                    dist = math.sqrt((x_p - x_i)**2 + (y_p - y_i)**2)
+                    hay_pinza = dist < 0.06
+
+                    es_circulo = False
+                    if len(historial_muneca_izquierda) >= 20:
+                        xs = [p[0] for p in historial_muneca_izquierda]
+                        ys = [p[1] for p in historial_muneca_izquierda]
+
+                        cx = sum(xs) / len(xs)
+                        cy = sum(ys) / len(ys)
+
+                        distancias = [math.sqrt((x - cx)**2 + (y - cy)**2) for x, y in zip(xs, ys)]
+                        radio_medio = sum(distancias) / len(distancias)
+
+                        inicio = historial_muneca_izquierda[0]
+                        fin = historial_muneca_izquierda[-1]
+
+                        cierre = math.sqrt((inicio[0]-fin[0])**2 + (inicio[1]-fin[1])**2)
+
+                        es_circulo = radio_medio > 0.02 and cierre < 0.10
+
+                    print(f"pinza={hay_pinza} circulo={es_circulo} frames={frames_stop}")
+                    if hay_pinza and es_circulo and en_zona_media:
+                        frames_stop += 1
+                    else:
+                        frames_stop = 0
+
+                    if frames_stop > 4 and time.time() - last_stop_time > 1.0:
+                        estado_orquesta = "STOP"
+                        send_gesture(bytes([MessageType.Stop.value]))
+                        historial_muneca_izquierda.clear()
+                        frames_stop = 0
+                        last_stop_time = time.time()
+                        return 
+
+                    # ---
                     es_palma = current_smoothed[4][0] > current_smoothed[20][0]
 
                     dedos_estirados = (
@@ -183,7 +232,7 @@ def main():
                                 volumenSuavizado += (volTarget - volumenSuavizado) * min(1.0, dt * inerciaVolumen)
                                 send_gesture(bytes([MessageType.Volume.value, round(volumenSuavizado * 100)]))
 
-                # --- MANO DERECHA: START Y STOP ---
+                # --- MANO DERECHA: START ---
                 if mano_nombre == "IZQUIERDA":
                     # Guardamos solo la posición actual de la muñeca (landmark 0) como (x, y)
                     pos_actual = (current_smoothed[0][0], current_smoothed[0][1])
@@ -208,43 +257,6 @@ def main():
                                 estado_orquesta = "PLAYING"
                                 send_gesture(bytes([MessageType.Start.value])) # Start
                                 historial_pos[h_idx] = [] # Limpiar para evitar doble disparo
-                            elif estado_orquesta == "PLAYING":
-                                x_pulgar = current_smoothed[4][0]
-                                y_pulgar = current_smoothed[4][1]
-
-                                x_indice = current_smoothed[8][0]
-                                y_indice = current_smoothed[8][1]
-
-                                # distancia de vectores
-                                d_pulgar_indice = math.sqrt(((x_pulgar - x_indice)**2) + ((y_pulgar - y_indice)**2))
-
-
-                                # Detectar circulo (varianza en X e Y)
-                                if len(historial_pos_muneca[h_idx]) >= 20:
-                                    xs = [p[0] for p in historial_pos_muneca[h_idx]]
-                                    ys = [p[1] for p in historial_pos_muneca[h_idx]]
-                                    # Si hay suficiente dispersión en ambos ejes, asumimos movimiento circular
-                                    es_circulo = (max(xs) - min(xs) > 0.15) and (max(ys) - min(ys) > 0.15)
-
-                                    # Distancia dedos
-                                    d_pulgar_indice = math.sqrt(((current_smoothed[4][0]-current_smoothed[8][0])**2) +
-                                                                ((current_smoothed[4][1]-current_smoothed[8][1])**2))
-
-                                    # STOP
-                                    if es_circulo and d_pulgar_indice < 0.04:
-                                        frames_stop += 1
-                                    else:
-                                        frames_stop = 0
-
-                                    if frames_stop > 10:
-                                        estado_orquesta = "STOP"
-                                        send_gesture(bytes([MessageType.Stop.value]))
-                                        historial_pos_muneca[h_idx] = []
-                                        frames_stop = 0
-#                                if d_pulgar_indice < 0.03:
-#                                    estado_orquesta = "STOP"
-#                                    send_gesture(bytes([MessageType.Stop.value])) # Stop
-#                                    historial_pos[h_idx] = [] # Limpiar para evitar doble disparo
 
     # --- Configuracion de Tareas de Mediapipe ---
     BaseOptions = mp.tasks.BaseOptions
