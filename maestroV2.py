@@ -295,7 +295,7 @@ def main():
             y_cadera = ((lm[23].y + lm[24].y) / 2)
 
 
-            if estado_orquesta != "PLAYING" and estado_orquesta != "STOP":
+            if estado_orquesta != "PLAYING":
                  with m_limites:
                     global altura_pecho_y, altura_cadera_y
                     # Calculo de lineas de referencia
