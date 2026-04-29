@@ -10,8 +10,7 @@ class MessageType(IntEnum):
     Ready = 0,
     Start = 1,
     Stop = 2,
-    Calderon = 10,
-    OffCalderon = 11,
+    Manos = 3,
     VolumeUp = 20,
     VolumeDown = 21,
     Volume = 22,
@@ -131,6 +130,7 @@ def main():
                 elif en_zona_media and estado_orquesta == "IDLE":
                     if tiempo_entrada_zona == 0:
                         tiempo_entrada_zona = time.time()
+                        send_gesture(bytes([MessageType.Manos.value]))
 
                     elif en_zona_media and time.time() - tiempo_entrada_zona > 3:
                       estado_orquesta = "READY"
