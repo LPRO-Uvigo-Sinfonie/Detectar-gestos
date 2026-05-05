@@ -132,7 +132,7 @@ def main():
                         tiempo_entrada_zona = time.time()
                         send_gesture(bytes([MessageType.Manos.value]))
 
-                    elif en_zona_media and time.time() - tiempo_entrada_zona > 3:
+                    elif en_zona_media and time.time() - tiempo_entrada_zona > 2:
                       estado_orquesta = "READY"
                       send_gesture(bytes([MessageType.Ready.value]))
                 else:
@@ -295,15 +295,14 @@ def main():
             y_cadera = ((lm[23].y + lm[24].y) / 2)
 
 
-            if estado_orquesta != "PLAYING":
-                 with m_limites:
-                    global altura_pecho_y, altura_cadera_y
-                    # Calculo de lineas de referencia
-                    altura_pecho_y = y_hombros + (y_cadera - y_hombros) * 0.35
-                    altura_cadera_y = y_cadera - 0.1
-                    # Dibujar guias visuales
-                    cv2.line(frame, (0, int(altura_pecho_y*h_img)), (w_img, int(altura_pecho_y*h_img)), (0, 255, 255), 2)
-                    cv2.line(frame, (0, int(altura_cadera_y*h_img)), (w_img, int(altura_cadera_y*h_img)), (0, 0, 255), 2)
+        with m_limites:
+            global altura_pecho_y, altura_cadera_y
+            # Calculo de lineas de referencia
+            altura_pecho_y = y_hombros + (y_cadera - y_hombros) * 0.35
+            altura_cadera_y = y_cadera
+            # Dibujar guias visuales
+            cv2.line(frame, (0, int(altura_pecho_y*h_img)), (w_img, int(altura_pecho_y*h_img)), (0, 255, 255), 2)
+            cv2.line(frame, (0, int(altura_cadera_y*h_img)), (w_img, int(altura_cadera_y*h_img)), (0, 0, 255), 2)
 
         # 2. Deteccion de Manos (Asincrona)
         detector_hand.detect_async(mp_image, timestamp_ms)
